@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Kids Chore Tracker</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body {
+font-family: Arial, sans-serif;
+background: #f2f4f7;
+padding: 15px;
+}
+h1 { text-align: center; }
+
+.controls {
+text-align: center;
+margin-bottom: 15px;
+}
+
+.child {
+border-radius: 12px;
+padding: 15px;
+margin-bottom: 25px;
+}
+
+.lily { background: #ffe4f0; }
+.isabel { background: #e3f2ff; }
+
+table {
+width: 100%;
+border-collapse: collapse;
+font-size: 12px;
+}
+
+th, td {
+border: 1px solid #aaa;
+text-align: center;
+padding: 4px;
+}
+
+th.sub {
+font-size: 10px;
+font-weight: normal;
+}
+
+input[type="text"] {
+width: 100%;
+font-size: 12px;
+}
+
+button {
+padding: 8px 12px;
+border: none;
+border-radius: 6px;
+background: #333;
+color: white;
+margin: 5px;
+}
+
+.locked input {
+pointer-events: none;
+background: #eee;
+}
+
+.points {
+font-weight: bold;
+margin-bottom: 6px;
+}
+</style>
+</head>
+<body>
+
+<h1>🧹 Kids Chore Tracker</h1>
+
+<div class="controls">
+<button onclick="parentLogin()">🔒 Parent</button>
+<button onclick="kidLogin('lily')">🌸 Lily</button>
+<button onclick="kidLogin('isabel')">💙 Isabel</button>
+</div>
+
+<div id="app"></div>
+
+<script>
+/* 🔐 PASSWORDS */
+const PARENT_PIN = "1234";
+const KID_PINS = { lily: "lily", isabel: "isabel" };
+
+/* 📅 CONSTANTS */
+const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+const TIMES = [
+{ key: "before", label: "Before School" },
+{ key: "after", label: "After School" },
+{ key: "night", label: "Night Time" }
+];
+
+/* 📦 STATE */
+let state = {
+role: null,
+kids: {
+lily: { chores: [], points: 0 },
+isabel: { chores: [], points: 0 }
+}
+};
+
+/* 💾 STORAGE */
+// 🔥 REAL-TIME FIRESTORE SAVE
+function save() {
+db.collection("chores")
+.doc("family")
+.set({ state: JSON.stringify(state) });
+}
+
+// 🔥 REAL-TIME FIRESTORE LOAD + LISTEN
+function load() {
+db.collection("chores")
+.doc("family")
+.onSnapshot((doc) => {
+if (doc.exists) {
+const data = doc.data();
+if (data.state) {
+state = JSON.parse(data.state);
+render();
+}
+}
+});
+}
+
+load();
+
+/* 🔑 LOGIN */
+function parentLogin() {
+if (prompt("Parent PIN:") === PARENT_PIN) {
+state.role = "parent";
+render();
+} else alert("Wrong PIN");
+}
+
+function kidLogin(child) {
+if (prompt(`${child} password:`) === KID_PINS[child]) {
+state.role = child;
+render();
+} else alert("Wrong password");
+}
+
+/* ➕ ADD CHORE */
+function addChore(child) {
+if (state.role !== "parent") return;
+
+const week = {};
+DAYS.forEach(d => {
+week[d] = {};
+TIMES.forEach(t => week[d][t.key] = false);
+});
+
+state.kids[child].chores.push({ name: "", week });
+save();
+render();
+}
+
+/* ☑️ TOGGLE */
+function toggle(child, choreIndex, day, time) {
+if (state.role !== child && state.role !== "parent") return;
+
+const slot = state.kids[child].chores[choreIndex].week[day][time];
+state.kids[child].chores[choreIndex].week[day][time] = !slot;
+
+updatePoints(child);
+save();
+render();
+}
+
+/* ✏️ RENAME */
+function renameChore(child, index, value) {
+if (state.role !== "parent") return;
+state.kids[child].chores[index].name = value;
+save();
+}
+
+/* ⭐ POINTS */
+function updatePoints(child) {
+let count = 0;
+state.kids[child].chores.forEach(c =>
+DAYS.forEach(d =>
+TIMES.forEach(t => { if (c.week[d][t.key]) count++; })
+)
+);
+state.kids[child].points = count;
+}
+
+/* 🎨 RENDER */
+function render() {
+const app = document.getElementById("app");
+app.innerHTML = "";
+
+["lily","isabel"].forEach(child => {
+const locked = state.role !== child && state.role !== "parent";
+const div = document.createElement("div");
+div.className = `child ${child} ${locked ? "locked" : ""}`;
+
+let html = `
+<h2>${child === "lily" ? "Lily 🌸" : "Isabel 💙"}</h2>
+<div class="points">⭐ Points: ${state.kids[child].points}</div>
+<table>
+<thead>
+<tr>
+<th>Chore</th>
+${DAYS.map(d => `<th colspan="3">${d}</th>`).join("")}
+</tr>
+<tr>
+<th></th>
+${DAYS.map(() =>
+TIMES.map(t => `<th class="sub">${t.label}</th>`).join("")
+).join("")}
+</tr>
+</thead>
+<tbody>
+`;
+
+state.kids[child].chores.forEach((chore, i) => {
+html += `<tr>
+<td>
+<input type="text" value="${chore.name}"
+oninput="renameChore('${child}',${i},this.value)">
+</td>`;
+
+DAYS.forEach(d =>
+TIMES.forEach(t => {
+html += `<td>
+<input type="checkbox"
+${chore.week[d][t.key] ? "checked" : ""}
+onchange="toggle('${child}',${i},'${d}','${t.key}')">
+</td>`;
+})
+);
+
+html += "</tr>";
+});
+
+html += `
+</tbody>
+</table>
+<button onclick="addChore('${child}')">➕ Add Chore</button>
+`;
+
+div.innerHTML = html;
+app.appendChild(div);
+});
+}
+
+render();
+</script>
+<!-- Firebase connection -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script>
+// 🔴 TEMPORARY placeholder (we replace this next)
+const firebaseConfig = {
+apiKey: "AIzaSyAgsYLOA8Is7QNPB0uBlAHe4adZD36Zwdo",
+authDomain: "kids-chores-5a74f.firebaseapp.com",
+projectId: "kids-chores-5a74f",
+storageBucket: "kids-chores-5a74f.firebasestorage.app",
+messagingSenderId: "331033770034",
+appId: "1:331033770034:web:8fb0d3adc8349eda12a42b"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+</script>
+</body>
+</html>
